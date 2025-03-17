@@ -72,7 +72,7 @@ def time_pairwise_kernel_rectangle(xs, ts, A, H, only_approx=False):
     return K, K_approx
 
 ## MLE Estimation
-def A_mle(xs, ts):
+def A_mle(xs, ts, ridge_lambda=0):
     # xs: N_traj x N x d
     # ts: N
     assert ts.shape[0] == xs.shape[1]
@@ -86,7 +86,7 @@ def A_mle(xs, ts):
     dxs = np.diff(xs, axis=1)
     DX_X = np.einsum('ijk,ijl -> kl', dxs, xs[:, :-1, :])
 
-    A = DX_X @ np.linalg.inv(X_X)
+    A = DX_X @ np.linalg.inv(X_X + ridge_lambda*np.eye(d))
     return A
 
 def H_mle(xs, ts, A):
@@ -227,10 +227,10 @@ def appex(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100):
         print(i)
     return As, Hs, Pis
 
-def appex_rectangle(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100, print_out = 100, save_coupling = False):
-    d = A.shape[0]
-    As = [np.ones((d, d)), A] # collection of A matrices
-    Hs = [np.ones((d, d)), H] #
+def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, maxiters = 100, print_out = 100, save_coupling = False, ridge_lambda=0.0):
+    d = A_guess.shape[0]
+    As = [np.ones((d, d)), A_guess] # collection of A matrices
+    Hs = [np.ones((d, d)), H_guess] #
     Pis = []
     i = 0
     while i < maxiters:
@@ -246,7 +246,7 @@ def appex_rectangle(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100
         # xs_sampled, idxs_sampled = sample_trajectory_xs(Pi, xs_data, N_sample = N_sample)
         xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi, xs_data, N_sample = N_sample)
 
-        A_mle_ = A_mle(xs_sampled, ts_data)
+        A_mle_ = A_mle(xs_sampled, ts_data, ridge_lambda=ridge_lambda)
         H_mle_ = H_mle(xs_sampled, ts_data, A_mle_)
         As.append(A_mle_)
         Hs.append(H_mle_)

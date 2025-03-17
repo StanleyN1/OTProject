@@ -96,7 +96,7 @@ def cov_integrand(A, H, t):
 
 def cov(A, H, t0, tf, n_integrate=10):
     ts = np.linspace(t0, tf, n_integrate)
-    cov = np.zeros((2, 2))
+    cov = np.zeros(A.shape)
     for i in range(n_integrate-1):
         cov += cov_integrand(A, H, tf - ts[i]) * (ts[i+1] - ts[i])
     return cov
