@@ -40,8 +40,13 @@ class BranchingStochasticProcess:
         self.Nt = len(self.ts)
         self.lineage = {}  # Store lineage of particles
     
-    def simulate(self, X0, lambda_func=lambda x: 0.0):
-        self.lambda_func = lambda_func
+    def simulate(self, X0, growth_rate=0.0):
+        if not callable(growth_rate):
+            growth_rate_func = lambda x: growth_rate
+            self.growth_rate = growth_rate
+        else:
+            growth_rate_func = growth_rate
+            
         particles = X0  # Initial particles
         self.trajectories = [[X] for X in particles]  # Store all trajectories
         
@@ -57,7 +62,7 @@ class BranchingStochasticProcess:
 
                 
                 # Branching condition (Poisson process)
-                if np.random.rand() < lambda_func(X) * self.dt:
+                if np.random.rand() < growth_rate_func(X) * self.dt:
                     new_particles.append(X_new)  # Keep the original
                     new_particles.append(X_new)  # Create a new branch at the same position
                     self.branch_times.append(ti + 1)  # Store branching time
@@ -148,7 +153,8 @@ class BranchingStochasticProcess:
             'Nt': self.Nt,
             'T': self.T,
             'N_traj': self.N_traj,
-            'branch_times': self.branch_times
+            'branch_times': self.branch_times,
+            'growth_rate': self.growth_rate
         }
     
     def save_file(self, path, downsample_rate=1):
