@@ -11,7 +11,7 @@ import wandb
 def algorithm(ts_data, xs_data, A_guess, H_guess, N_sample, appex_maxiters):
     
     start = timeit.default_timer()
-    As, Hs, Pis = appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample=N_sample, tol=1e-5, maxiters=appex_maxiters, print_out=5, save_coupling=True)
+    As, Hs, Pis = appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample=N_sample, tol=1e-5, maxiters=appex_maxiters, print_out=1, save_coupling=True)
     end = timeit.default_timer()
     
     algorithm_time = end - start
@@ -26,7 +26,7 @@ def run_sweep(config=None):
         process = BranchingStochasticProcess(np.array(config.A), np.array(config.G), dt=config.dt, Nt=config.Nt, N_traj=config.N_init)
         
         X0 = np.random.multivariate_normal(np.zeros(process.d), np.diag(np.ones(process.d)), process.N_traj) # np.random.normal(0, 1, (N_init, A.shape[1]))
-        process.simulate(X0)
+        process.simulate(X0, growth_rate=config.growth_rate)
         
         ts_data, xs_data = process.get_marginal_data(config.downsample_rate)
         
@@ -60,7 +60,7 @@ if __name__ == "__main__":
             'values' : [100, 250, 500, 1000]
         },
         'N_init' : {
-            'values': [10, 50, 100]
+            'values': [10, 25, 50, 100]
         },
         'N_sample' : {
             'values' : [10, 50, 100, 200, 500, 1000]
@@ -85,8 +85,13 @@ if __name__ == "__main__":
         },
         'H_guess' : {
             'value' : H_guess
+        },
+        'growth_rate' : {
+            'values' : [0.0, 0.5, 1.0]
         }
     }
+    num_runs = np.prod([len(parameters_dict[key]['values']) for key in parameters_dict if 'values' in parameters_dict[key]])
+
     sweep_config['parameters'] = parameters_dict
     sweep_id = wandb.sweep(sweep_config, project="appex-parameter-sweep")
-    wandb.agent(sweep_id, run_sweep, count=72)
+    wandb.agent(sweep_id, run_sweep, count=num_runs)

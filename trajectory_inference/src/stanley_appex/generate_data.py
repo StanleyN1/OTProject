@@ -161,7 +161,7 @@ class BranchingStochasticProcess:
         import h5py
         with h5py.File(path, 'w') as f:
             xs_data = self.mask_non_unique(downsample_rate=downsample_rate)
-            ts_data = self.trajectories[:, ::downsample_rate, :]
+            ts_data = self.ts[::downsample_rate] # self.trajectories[:, ::downsample_rate, :]
             
             # ts_data, xs_data = self.get_marginal_data(downsample_rate=downsample_rate)
             
@@ -173,3 +173,8 @@ class BranchingStochasticProcess:
                 dset_xs_data.attrs[key] = value
                 
         print(f"Data saved to {path}")
+        
+    def load_data(self, path):
+        import h5py
+        f = h5py.File(path)
+        return f

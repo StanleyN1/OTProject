@@ -242,7 +242,7 @@ def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, ma
             print(f"iteration {i}, running tolerance {running_tol}")
         # Pi, K, K_approx = OT_time_kernel(xs_data, ts_data, As[-1], Hs[-1], maxiters = 100)
 
-        Pi, K, K_approx = OT_time_kernel_rectangle(xs_data, ts_data, As[-1], Hs[-1], maxiters = 100)
+        Pi, K, K_approx = OT_time_kernel_rectangle(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
         # xs_sampled, idxs_sampled = sample_trajectory_xs(Pi, xs_data, N_sample = N_sample)
         xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi, xs_data, N_sample = N_sample)
 
