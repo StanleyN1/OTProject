@@ -67,10 +67,11 @@ def plot_kernel_coupling(idx, xs_data, ts_data, A, H):
     axs[0].set_title("K_rect")
     axs[1].imshow(coupling)
     axs[1].set_title("Coupling")
+    # fig.colorbar(im, cax=axs[1])
     plt.show()    
 
-def plot_sampling(xs_data, ts_data, Pi_est, trajectories, branch_times_data, N_sample=10, plot_dim=1):
-    xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi_est, xs_data, N_sample=N_sample)
+def plot_sampling(xs_data, ts_data, Pi_est, trajectories, branch_times_data, N_sample=10, plot_dim=1, reverse=False):
+    xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi_est, xs_data, N_sample=N_sample, reverse=reverse)
     N_traj = trajectories.shape[0]
     # 1d trajectories
     if plot_dim == 1:
@@ -142,5 +143,6 @@ def matrix_errors(process, As, Hs, downsample_rate=1, plot=False):
         plt.ylabel('frobenius norm error')
         plt.xlabel('iteration')
         plt.legend()
+        plt.show()
     
     return A_errors, H_errors

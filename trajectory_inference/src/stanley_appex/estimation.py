@@ -127,6 +127,24 @@ def OT_time_kernel_rectangle(xs, ts, A, H, maxiters = 1000):
     
         mu = np.ones(N_curr) / N_curr
         nu = np.ones(N_future) / N_future
+        
+        pi = OT_sinkhorn(mu, nu, K[t_idx])
+        # pi = sinkhorn_log(mu, nu, K[t_idx], maxiter=maxiters)
+        Pi.append(pi)
+    return Pi, K, K_approx
+
+def OT_time_kernel_rectangle_unnormalized(xs, ts, A, H, maxiters = 1000):
+    # K: N x N_traj(t_curr) x N_traj(t_future)
+    # Pi: N x N_traj(t_curr) x N_traj(t_future)
+    Pi = []
+    K, K_approx = time_pairwise_kernel_rectangle(xs, ts, A, H, only_approx=False)
+    for t_idx in range(len(ts) - 1):
+        N_curr = K[t_idx].shape[0]
+        N_future = K[t_idx].shape[1]
+    
+        mu = np.ones(N_curr) # / N_curr
+        nu = np.ones(N_future) # / N_future
+        
         pi = OT_sinkhorn(mu, nu, K[t_idx])
         # pi = sinkhorn_log(mu, nu, K[t_idx], maxiter=maxiters)
         Pi.append(pi)
@@ -136,6 +154,7 @@ def normalize_column(column):
     return column / np.sum(column)
 
 def sample_trajectory_idxs(Pi, N_sample):
+    # Pi: N_traj, N_traj, N
     N_traj = Pi.shape[0] # assuming constant number of trajectories
     N = Pi.shape[2] + 1
     idxs_sampled = np.zeros((N_sample, N), dtype=int)
@@ -149,6 +168,8 @@ def sample_trajectory_idxs(Pi, N_sample):
             sample_idx = np.random.choice(N_traj, p=pi_next_given_curr)
             idxs_sampled[i, t_idx] = sample_idx
     return idxs_sampled
+
+
 
 def sample_trajectory_idxs_rectangle(Pi, N_sample):
     # idxs_sampled: N_sample x N
@@ -171,6 +192,27 @@ def sample_trajectory_idxs_rectangle(Pi, N_sample):
             
     return idxs_sampled
 
+def sample_trajectory_idxs_rectangle_reverse(Pi, N_sample):
+    # idxs_sampled: N_sample x N
+    N = len(Pi)
+    idxs_sampled = np.zeros((N_sample, N+1), dtype=int)
+    
+    for i in range(N_sample):
+        N_traj = Pi[N-1].shape[0] # assuming constant number of trajectories
+        sample_idx = np.random.choice(N_traj) # uniformly choose a random trajectory
+        idxs_sampled[i, N] = sample_idx
+        
+        for t_idx in range(N-1, -1, -1):
+            N_traj = Pi[t_idx].shape[0] # previous
+            # N_traj = Pi[t_idx - 1].shape[1] # future
+            
+            # pi_next_given_curr = normalize_column(Pi[t_idx - 1][:, sample_idx]) # conditional p_{i+1 | i} previous
+            pi_next_given_curr = normalize_column((Pi[t_idx].T)[sample_idx, :]) # conditional p_{i+1 | i}
+            sample_idx = np.random.choice(N_traj, p=pi_next_given_curr)
+            idxs_sampled[i, t_idx] = sample_idx
+            
+    return idxs_sampled
+
 def index_trajectory(xs, idxs_sampled):
     # xs: N_traj x N x d
     # idxs_sampled: N_sample x N
@@ -186,7 +228,7 @@ def index_trajectory(xs, idxs_sampled):
 def index_trajectory_rectangle(xs, idxs_sampled):
     # xs: N x N_traj x d
     # idxs_sampled: N_sample x N
-    assert idxs_sampled.shape[1] == len(xs) # same number of time steps
+    assert idxs_sampled.shape[1] == len(xs), f"length of sampled traj: {idxs_sampled.shape[1]}, length of data traj: {len(xs)}" # same number of time steps
     N = idxs_sampled.shape[1]
     N_sample = idxs_sampled.shape[0]
     d = len(xs[0][0])
@@ -196,14 +238,15 @@ def index_trajectory_rectangle(xs, idxs_sampled):
             xs_sampled[sample_traj_idx, i, :] = xs[i][traj_idx]
     return xs_sampled
 
-
-
 def sample_trajectory_xs(Pi, xs, N_sample):
     idxs_sampled = sample_trajectory_idxs(Pi, N_sample)
     return index_trajectory(xs, idxs_sampled), idxs_sampled
 
-def sample_trajectory_xs_rectangle(Pi, xs, N_sample):
-    idxs_sampled = sample_trajectory_idxs_rectangle(Pi, N_sample)
+def sample_trajectory_xs_rectangle(Pi, xs, N_sample, reverse=False):
+    if not reverse:
+        idxs_sampled = sample_trajectory_idxs_rectangle(Pi, N_sample)
+    else:
+        idxs_sampled = sample_trajectory_idxs_rectangle_reverse(Pi, N_sample)
     return index_trajectory_rectangle(xs, idxs_sampled), idxs_sampled
 
 def appex(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100):
@@ -227,7 +270,7 @@ def appex(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100):
         print(i)
     return As, Hs, Pis
 
-def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, maxiters = 100, print_out = 100, save_coupling = False, ridge_lambda=0.0):
+def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, maxiters = 100, print_out = 100, save_coupling = False, ridge_lambda=0.0, reverse=False):
     d = A_guess.shape[0]
     As = [np.ones((d, d)), A_guess] # collection of A matrices
     Hs = [np.ones((d, d)), H_guess] #
@@ -242,10 +285,11 @@ def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, ma
             print(f"iteration {i}, running tolerance {running_tol}")
         # Pi, K, K_approx = OT_time_kernel(xs_data, ts_data, As[-1], Hs[-1], maxiters = 100)
 
-        Pi, K, K_approx = OT_time_kernel_rectangle(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
+        # Pi, K, K_approx = OT_time_kernel_rectangle(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
+        Pi, K, K_approx = OT_time_kernel_rectangle_unnormalized(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
         # xs_sampled, idxs_sampled = sample_trajectory_xs(Pi, xs_data, N_sample = N_sample)
-        xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi, xs_data, N_sample = N_sample)
-
+        xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi, xs_data, N_sample = N_sample, reverse=reverse)
+        
         A_mle_ = A_mle(xs_sampled, ts_data, ridge_lambda=ridge_lambda)
         H_mle_ = H_mle(xs_sampled, ts_data, A_mle_)
         As.append(A_mle_)
