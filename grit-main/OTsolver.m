@@ -6,7 +6,7 @@ mu1 = mu1(:);
 if abs(size(mu0,1)-size(C,1))+abs(size(mu1,1)-size(C,2)) >= 1
     disp('dimension error')
     mu0dim = size(mu0)
-    mu1dim = size(mu0)
+    mu1dim = size(mu1)
     Cdim = size(C)
 end
 

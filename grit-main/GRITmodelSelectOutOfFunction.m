@@ -1,20 +1,29 @@
-function [XX,YY,transportMap,J,A,D,WW,corNet,indw,indexp,TFflag,difs,out,opts] = GRITmodelSelect(scdata,Tgrid,TFflag,branchId,opts)
 
- %   Copyright 2024 Atte AALTO, FRANCOIS LAMOLINE, JORGE GONCALVES, 
- %   JOHAN KARLSSON, ISABEL HAASLER
- %
- %   Licensed under the Apache License, Version 2.0 (the "License");
- %   you may not use this file except in compliance with the License.
- %   You may obtain a copy of the License at
- % 
- %       http://www.apache.org/licenses/LICENSE-2.0
- %
- %   Unless required by applicable law or agreed to in writing, software
- %   distributed under the License is distributed on an "AS IS" BASIS,
- %   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- %   See the License for the specific language governing permissions and
- %   limitations under the License.
+%% Generate Synthetic Data
+rng(42);
+n_genes = 5;
+n_timepoints = 30;
+n_cells = 50;
+epsilon = 1;
+% A_true = 0.1*([
+%     -0.5, 0.2, 0, 0, 0;
+%     0.1, -0.1, 0.3, -0.8, 0;
+%     0, 0.1, -0.7, 0.2, 0;
+%     0, 0.8, 0.2, -0.8, 0.1;
+%     0, 0, 0, 0.1, -0.9]);
+A_true = 0.1*eye(n_genes);
+b_true = 0.1*ones(n_genes,1);
+b_true = zeros(n_genes,1);
+x0 = rand(n_genes,1)*5; 
 
+%[scdata, Tgrid] = SyntheticDataGeneration_YQ(A_true, b_true, x0, n_timepoints, n_cells, epsilon,"/Users/yqian46/Library/Mobile Documents/com~apple~CloudDocs/PHD/Research/GRN/GRN Inference Code/Data");
+[scdata, Tgrid] = SyntheticDataGeneration_YQ(A_true, b_true, x0, n_timepoints, n_cells, epsilon);
+opts = struct;
+
+%% GRIT CODE
+TFflag = [];
+branchId = [];
+opts = struct;
 
 out = struct;
 
@@ -177,7 +186,7 @@ sc = diag(corNet).^-.5;
 corNet = sc.*corNet.*sc';
 out.vars = diag(S).^2/sum(sum(Xc(:).^2));
 indmiss = [0 indmiss];
-clear('Xc')
+%clear('Xc')
     
 
 %Scale XX with dt^.5 now that Ured is calculated
@@ -202,7 +211,7 @@ end
 brm(isinf(brm)) = 1;
 
 % Solve A iteratively
-A = zeros(ndim,ndim+nbr);
+A = ones(ndim,ndim+nbr);
 difs = zeros(1,opts.iterations);
 J = zeros(1,opts.iterations);
 out.its = zeros(opts.iterations,length(indtr));
@@ -215,18 +224,18 @@ for jiter = 1:opts.iterations
     kreg = min(.5 + .7*jiter/opts.iterations,1);
     Aold = A;
     
-    parfor (jt = 1:length(indtr), opts.par)
-    %for jt = 1:length(indtr)
+    %parfor (jt = 1:length(indtr), opts.par)
+    for jt = 1:length(indtr)
         
         %Propagated and target points
         X0 = scdata{indtr(jt)} + (Tgrid(indtr(jt)+1)-Tgrid(indtr(jt)))*A*[scdata{indtr(jt)}; branchId{indtr(jt)}];
         X1 = scdata{indtr(jt)+1};
 
+
         %Cost matrix
         ett0 = ones(size(X0,2),1);
         ett1 = ones(size(X1,2),1);
         C = sum((Ured'*(vvs(:,jt).*X0)).^2,1)'*ett1'- 2*(Ured'*(vvs(:,jt).*X0))'*(Ured'*(vvs(:,jt).*X1)) + ett0*sum((Ured'*(vvs(:,jt).*X1)).^2,1);
-       
         %Increase those elements of the cost that correspond to jumps from
         %a branch to another by a factor opts.branchWeight.
         C = C.*(1 + (opts.branchWeight-1)*(branchId{indtr(jt)}'*branchId{indtr(jt)+1} == 0));
@@ -248,6 +257,7 @@ for jiter = 1:opts.iterations
         failedSinkhornIterations = -1;
         while failInd && failedSinkhornIterations < 10
             [transport_cost,reg_cost, M, iteration_count, uFinal] = OTsolver(mu0,mu1, C, epsloc*median(C(:)), uInit);
+            
             failInd = sum(isnan(M(:))) > 0;
             epsloc = 1.5*epsloc;
             failedSinkhornIterations = failedSinkhornIterations + 1;
@@ -297,7 +307,6 @@ for jiter = 1:opts.iterations
         TFloc(jg) = true;
         Anew(jg,TFloc) = An{jg};
     end
-        
     % Regularise with smaller step size (increasing over iterations)
     A = (1-kreg)*Aold + kreg*Anew;
     
@@ -307,7 +316,6 @@ for jiter = 1:opts.iterations
     if strcmp(opts.disp,'all')
         disp(['Iteration ' num2str(jiter) '/' num2str(opts.iterations) ' done.'])
     end
-
 end
 A = Anew;
 
@@ -333,3 +341,4 @@ if ~strcmp(opts.disp,'off')
     disp('Model identification complete.')
 end
 
+%OUPUT = [XX,YY,transportMap,J,A,D,WW,corNet,indw,indexp,TFflag,difs,out,opts];
