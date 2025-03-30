@@ -38,7 +38,6 @@ class BranchingStochasticProcess:
         print(len(self.ts))
         assert len(self.ts) == self.Nt, "Length of ts must be equal to Nt"
         self.Nt = len(self.ts)
-        self.lineage = {}  # Store lineage of particles
     
     def simulate(self, X0, growth_rate=0.0):
         if not callable(growth_rate):
@@ -82,38 +81,116 @@ class BranchingStochasticProcess:
         self.trajectories = np.array(self.trajectories)
         self.N_traj = self.trajectories.shape[0]
         self.time_marginals = self.marginals()
+    
+    def simulate_track(self, X0, growth_rate=0.0):
+        # BROKEN AS OF 3/20/25
+        # self.lineage = list(range(len(X0)))
         
-    def plot_trajectories(self, downsample=1, dim=2):
+        if not callable(growth_rate):
+            growth_rate_func = lambda x: growth_rate
+            self.growth_rate = growth_rate
+        else:
+            growth_rate_func = growth_rate
+        
+        particles = X0  # Initial particles
+        parent_map = {i: i for i in range(len(particles))}  # Track parent indices
+        
+        self.trajectories = [[X] for X in particles]
+        
+        t = self.dt
+        ti = 1
+        while t < self.T:
+            new_particles = []
+            new_trajectories = []
+            new_lineage = []
+            next_id = len(parent_map)  # New index for particles
+            
+            for i, X in enumerate(particles):
+                dW = np.random.randn(len(X)) * np.sqrt(self.dt)
+                X_new = X + self.A @ X * self.dt + self.G @ dW
+
+                # Branching condition (Poisson process)
+                if np.random.rand() < growth_rate_func(X) * self.dt:
+                    new_particles.append(X_new)  # Keep the original
+                    new_particles.append(X_new)  # Create a new branch at the same position
+                    self.branch_times.append(ti + 1)
+
+                    # Track lineage
+                    # parent_map[next_id] = parent_map[i]  # First branch retains original parent
+                    # parent_map[next_id + 1] = parent_map[i]  # New branch also gets same parent
+                    parent_map[next_id] = i
+                    parent_map[next_id + 1] = i 
+                    # Update trajectories
+                    new_trajectories.append(self.trajectories[i] + [X_new])
+                    new_trajectories.append(self.trajectories[i] + [X_new])
+                    
+                    # Update lineage list
+                    # new_lineage.append(parent_map[next_id])
+                    # new_lineage.append(parent_map[next_id + 1])
+                    new_lineage.append(i)
+                    new_lineage.append(i)
+                    
+                    next_id += 2  # Increment ID counter
+                else:
+                    new_particles.append(X_new)
+                    new_trajectories.append(self.trajectories[i] + [X_new])
+                    
+                    # Track lineage (no branching)
+                    
+                    # parent_map[next_id] = parent_map[i]
+                    # new_lineage.append(parent_map[next_id])
+                    
+                    parent_map[next_id] = i
+                    new_lineage.append(i)
+                    
+                    next_id += 1
+
+            particles = new_particles
+            self.trajectories = new_trajectories
+            self.lineage = new_lineage  # Update lineage tracking
+            
+            t += self.dt
+            ti += 1
+        self.trajectories = np.array(self.trajectories)
+        self.N_traj = self.trajectories.shape[0]
+    
+    def plot_trajectories(self, downsample=1, dim=2, legend=False):
         plt.figure(figsize=(4, 4))
         if dim == 0:
-            for traj in self.trajectories:
+            for i, traj in enumerate(self.trajectories):
                 traj = np.array(traj)
-                plt.plot(traj[::downsample, 0], alpha=0.7)
+                plt.plot(traj[::downsample, 0], alpha=0.7, label=f'Traj {i}')
             plt.xlabel('Time')
             plt.ylabel('X')
             plt.title('Branching Stochastic Process in 1D')
-            plt.show()
             
         if dim == 1:
-            for traj in self.trajectories:
+            for i, traj in enumerate(self.trajectories):
                 traj = np.array(traj)
-                plt.plot(traj[::downsample, 1], alpha=0.7)
+                plt.plot(traj[::downsample, 1], alpha=0.7, label=f'Traj {i}')
             plt.xlabel('Time')
             plt.ylabel('X')
             plt.title('Branching Stochastic Process in 1D')
-            plt.show()
             
         if dim == 2:
-            for traj in self.trajectories:
+            for i, traj in enumerate(self.trajectories):
                 traj = np.array(traj)
-                plt.plot(traj[::downsample, 0], traj[::downsample, 1], alpha=0.7)
+                plt.plot(traj[::downsample, 0], traj[::downsample, 1], alpha=0.7, label=f'Traj {i}')
             plt.xlabel('X1')
             plt.ylabel('X2')
             plt.title('Branching Stochastic Process in 2D')
-            plt.show()
+
+        if legend:
+            plt.legend()
+        plt.show()
+        
             
     def downsample(self, downsample_rate=1):
         return self.trajectories[:, ::downsample_rate, :]
+    
+    def get_branch_times(self, downsample_rate=1):
+        branch_times_data = np.array(self.branch_times) // downsample_rate
+        return branch_times_data
 
     def marginals(self, downsample_rate=1):
         # returns an N_traj x Nt x d array
@@ -177,4 +254,5 @@ class BranchingStochasticProcess:
     def load_data(self, path):
         import h5py
         f = h5py.File(path)
+    
         return f
