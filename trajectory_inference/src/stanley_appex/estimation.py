@@ -278,15 +278,15 @@ def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, ma
     i = 0
     while i < maxiters:
         running_tol = np.linalg.norm(As[-1] - As[-2])
-        if running_tol < tol:
-            print(f"tolerance {running_tol} reached at iteration {i}")
-            break
+        # if running_tol < tol:
+        #     print(f"tolerance {running_tol} reached at iteration {i}")
+        #     break
         if i % print_out == 0:
             print(f"iteration {i}, running tolerance {running_tol}")
         # Pi, K, K_approx = OT_time_kernel(xs_data, ts_data, As[-1], Hs[-1], maxiters = 100)
 
-        # Pi, K, K_approx = OT_time_kernel_rectangle(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
-        Pi, K, K_approx = OT_time_kernel_rectangle_unnormalized(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
+        Pi, K, K_approx = OT_time_kernel_rectangle(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
+        # Pi, K, K_approx = OT_time_kernel_rectangle_unnormalized(xs_data, ts_data, As[-1], Hs[-1], maxiters = 500)
         # xs_sampled, idxs_sampled = sample_trajectory_xs(Pi, xs_data, N_sample = N_sample)
         xs_sampled, idxs_sampled = sample_trajectory_xs_rectangle(Pi, xs_data, N_sample = N_sample, reverse=reverse)
         
@@ -298,3 +298,35 @@ def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, ma
             Pis.append(Pi)
         i += 1
     return As, Hs, Pis
+
+def run_appex(hfile, A_guess = 0.01*np.eye(2), H_guess = np.eye(2), maxiters=30, return_errors=False):
+    """currently only for no branching data"""
+    # xs_data: (N, N_traj, d)
+    # ts_data: (N,)
+    downsample_rate = hfile['xs_data'].attrs['downsample_rate']
+    N_traj = hfile['xs_data'].attrs['N_traj']
+
+    ts_data = hfile['ts_data'][:]
+    xs_data = hfile['xs_data'][:].transpose(1, 0, 2)
+
+    ridge_lambda = 0.0
+    print(xs_data.shape, ts_data.shape)
+    As, Hs, Pis = appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample=N_traj*10, ridge_lambda=ridge_lambda, tol=1e-5, maxiters=maxiters, print_out=10, save_coupling=True, reverse=False)
+
+    A_est = As[-1]
+    H_est = Hs[-1]
+    Pi_est = Pis[-1]
+    print("A_est:\n", A_est)
+    print("H_est:\n", H_est)
+    
+    A_true = hfile['xs_data'].attrs['A']
+    G_true = hfile['xs_data'].attrs['G']
+    H_true = G_true @ G_true.T
+    
+    if return_errors:
+        A_errors = [np.linalg.norm(A - A_true, ord="fro") for A in As]
+        H_errors = [np.linalg.norm(H - H_true, ord="fro") for H in Hs]
+    
+        return A_est, H_est, A_errors, H_errors
+    else:
+        return A_est, H_est

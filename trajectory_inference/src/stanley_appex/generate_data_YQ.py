@@ -4,7 +4,7 @@ from generate_data import BranchingStochasticProcess
 import os
 
 # Set the output directory (change this to your desired path)
-output_dir = "src/data"  # Default directory
+output_dir = "src/data/larger_noise"  # Default directory
 
 # Allow specifying directory through command line argument
 import sys
@@ -23,7 +23,7 @@ Nt = 1500  # Total number of time steps as requested
 N_initial = 50  # Number of initial particles as requested
 
 # Define diffusion matrix G (same for all simulations)
-G = np.array([[0.1, 0], 
+G = 10*np.array([[0.1, 0], 
               [0, 0.1]])
 
 # Define A matrices with different eigenvalue properties
