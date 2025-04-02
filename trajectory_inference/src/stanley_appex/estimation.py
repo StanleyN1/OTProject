@@ -256,9 +256,9 @@ def appex(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100):
     Pis = []
     i = 0
     while i < maxiters:
-        if np.linalg.norm(As[-1] - As[-2]) < tol:
-            print(f"tolerance reached at iteration {i}")
-            break
+        # if np.linalg.norm(As[-1] - As[-2]) < tol:
+        #     print(f"tolerance reached at iteration {i}")
+        #     break
         Pi, K, K_approx = OT_time_kernel(xs_data, ts_data, As[-1], Hs[-1], maxiters = 100)
         xs_sampled, idxs_sampled = sample_trajectory_xs(Pi, xs_data, N_sample = N_sample)
         A_mle_ = A_mle(xs_sampled, ts_data)

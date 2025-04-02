@@ -61,18 +61,21 @@ class BranchingStochasticProcess:
 
                 
                 # Branching condition (Poisson process)
-                if np.random.rand() < growth_rate_func(X) * self.dt:
-                    new_particles.append(X_new)  # Keep the original
-                    new_particles.append(X_new)  # Create a new branch at the same position
-                    self.branch_times.append(ti + 1)  # Store branching time
-                    
-                    # Duplicate trajectory for new branch
-                    new_trajectories.append(self.trajectories[i] + [X_new])
-                    new_trajectories.append(self.trajectories[i] + [X_new])
+                if not np.isclose(self.growth_rate, 0.0):
+                    if np.random.rand() < growth_rate_func(X) * self.dt:
+                        new_particles.append(X_new)  # Keep the original
+                        new_particles.append(X_new)  # Create a new branch at the same position
+                        self.branch_times.append(ti + 1)  # Store branching time
+                        
+                        # Duplicate trajectory for new branch
+                        new_trajectories.append(self.trajectories[i] + [X_new])
+                        new_trajectories.append(self.trajectories[i] + [X_new])
+                    else:
+                        new_particles.append(X_new)
+                        new_trajectories.append(self.trajectories[i] + [X_new])
                 else:
                     new_particles.append(X_new)
                     new_trajectories.append(self.trajectories[i] + [X_new])
-                
             particles = new_particles
             self.trajectories = new_trajectories
             t += self.dt
@@ -80,6 +83,7 @@ class BranchingStochasticProcess:
         
         self.trajectories = np.array(self.trajectories)
         self.N_traj = self.trajectories.shape[0]
+        print(self.trajectories.shape)
         self.time_marginals = self.marginals()
     
     def simulate_track(self, X0, growth_rate=0.0):
