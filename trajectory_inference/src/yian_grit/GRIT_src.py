@@ -1637,9 +1637,9 @@ def GRIT_MATLAB_No_adhock_nob(scdata, Tgrid, epsilon):
                 
                 # Check if solution contains NaN values
                 failInd = np.sum(np.isnan(M)) > 0
-                print("<><> INCREASING EPSILON IN SINKHORN <><>")
-                epsloc = 1.1 * epsloc  # Increase regularization (less aggressively than previous version)
+                # epsloc = 1.1 * epsloc  # Increase regularization (less aggressively than previous version)
                 failedSinkhornIterations += 1
+            # print(f"<><> FINAL EPSILON IN SINKHORN WITH EPS: {epsloc}, FAILED: {failInd}<><>")
 
             # Store transport map for this transition
             tMap[jt] = M
