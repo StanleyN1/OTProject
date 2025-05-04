@@ -1,8 +1,0 @@
-trajectory_inference/src/wandb/
-trajectory_inference/src/stanley_appex/__pycache__/
-trajectory_inference/src/stanley_appex/__pycache__/
-trajectory_inference/src/stanley_appex/__pycache__/estimation.cpython-310.pyc
-trajectory_inference/src/stanley_appex/__pycache__/estimation.cpython-310.pyc
-trajectory_inference/src/stanley_appex/__pycache__/generate_data.cpython-310.pyc
-trajectory_inference/src/stanley_appex/__pycache__/plotting.cpython-310.pyc
-trajectory_inference/src/stanley_appex/__pycache__/utils.cpython-310.pyc

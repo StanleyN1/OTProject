@@ -1529,8 +1529,10 @@ def GRIT_MATLAB_No_adhock_nob(scdata, Tgrid, epsilon):
         Regularization parameter for optimal transport
     Returns:
     --------
-    Gene regulatory matrix A and the transport maps
-    size of A is (n_genes, n_genes)
+    A: size of A is (n_genes, n_genes)
+        Gene regulatory matrix A and the transport maps
+    transportMap: list of ncell by ncell numpy arrays with length len(scdata). The last entry is None.
+        Transport maps for each time point for last iteration
     """
 
     # Set display mode and number of iterations
@@ -1684,6 +1686,107 @@ def GRIT_MATLAB_No_adhock_nob(scdata, Tgrid, epsilon):
          
     # Return the gene regulatory matrix A and transport maps
     return A, transportMap
+
+def GRIT_MATLAB_regression_step_only(scdata, Tgrid, transportMap):
+    """
+    Regression step of GRIT algorithm without optimal transport
+    
+    Parameters:
+    -----------
+    scdata : list of numpy arrays
+        Single-cell data for each time point
+    Tgrid : list or numpy array
+        Time points for the data
+    transportMap : list of ncell by ncell numpy arrays with length len(scdata)-1 (number of tansition)
+        Transport maps for each transition between time points
+    Returns:
+    --------
+    Gene regulatory matrix A and the transport maps
+    size of A is (n_genes, n_genes)
+    """
+
+    # Get the number of genes from the first time point data
+    ndim = scdata[0].shape[0]  # Number of genes
+
+    # Initialize array to store cell counts at each time point
+    ncell = np.zeros(len(scdata), dtype=int)
+    # nzeros = 0  # Commented out: counter for zero entries (unused)
+    # nelements = 0  # Commented out: counter for total elements (unused)
+
+    # Count cells at each time point
+    for jt in range(len(scdata)):
+        ncell[jt] = scdata[jt].shape[1]  # Number of cells at time point jt
+
+    # Convert time grid to numpy array and get transition indices
+    Tgrid = np.array(Tgrid)
+    indtr = np.arange(len(scdata)-1)  # Indices for transitions between time points
+
+    # Check that time grid length matches data length
+    if len(Tgrid) != len(scdata):
+        raise ValueError("Time grid vector length does not match the data structure size")
+
+    # Initialize regression matrices
+    XX = np.empty((ndim, 0))  # Matrix to store gene expression data
+    DT = np.empty(0)  # Vector to store time differences
+
+    # Build regression matrices by concatenating data from all time points
+    for jt in range(len(indtr)):
+        data_at_jt = scdata[indtr[jt]]  # Get data at current time point
+        XX = np.hstack([XX, data_at_jt])  # Add data to XX matrix
+        
+        # Calculate square root of time differences for each cell
+        dt_values = (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5 * np.ones(ncell[indtr[jt]])
+        DT = np.hstack([DT, dt_values])  # Add time differences to DT vector
+
+    # Initialize target matrix for regression (will hold derivatives)
+    YY = np.zeros((ndim, XX.shape[1]))
+
+    # Scale gene expression data by time differences
+    XX = DT * XX
+
+    # Initialize gene regulatory matrix A with ones (instead of zeros in the previous version)
+    # This means initially all genes are assumed to regulate all other genes
+    A = np.ones((ndim, ndim))
+
+    # Initialize arrays for main iteration loop
+    der = [None] * len(indtr)  # Derivatives
+
+# Process each transition between consecutive time points
+    for jt in range(len(indtr)):
+        # Propagate current state to next time point using current A matrix
+        # Note: No branch padding used in this version
+        X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ scdata[indtr[jt]]  # Propagated data
+        X1 = scdata[indtr[jt]+1]  # Target data
+
+        M =transportMap[jt]  # define transport map
+
+        # Normalize transport map rows to sum to 1
+        M = M / np.sum(M, axis=1, keepdims=True)
+
+        # Estimate derivatives using transport map
+        # Note: Simpler formula without weighted product
+        X1M = X1 @ M.T
+        der[jt] = (X1M - scdata[indtr[jt]]) / (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5
+
+    # Collect derivatives from all transitions
+    iaux = 0
+    for jt in range(len(indtr)):
+        YY[:, iaux:iaux + der[jt].shape[1]] = der[jt]  # Store derivatives in YY
+        iaux += der[jt].shape[1]  # Update index
+
+    # Solve for A using regression (no regularization)
+    Anew = np.zeros_like(A)
+
+    for jg in range(ndim):
+        # Standard least squares regression without regularization
+        reg_matrix = XX @ XX.T  # No regularization term added to diagonal
+        Anew[jg, :] = YY[jg] @ XX.T @ np.linalg.inv(reg_matrix)
+
+    # Update A (no regularization mixing parameter, directly use new solution)
+    A = Anew
+         
+    # Return the gene regulatory matrix A and transport maps
+    return A
 
 def generate_sparse_A(n_genes, sparsity=0.4):
     """
