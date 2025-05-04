@@ -1523,6 +1523,7 @@ def GRIT_MATLAB_No_adhock_nob(scdata, Tgrid, epsilon):
     -----------
     scdata : list of numpy arrays
         Single-cell data for each time point
+        (time x number of genes x number of cells)
     Tgrid : list or numpy array
         Time points for the data
     epsilon : float
@@ -1638,8 +1639,9 @@ def GRIT_MATLAB_No_adhock_nob(scdata, Tgrid, epsilon):
                 
                 # Check if solution contains NaN values
                 failInd = np.sum(np.isnan(M)) > 0
-                epsloc = 1.1 * epsloc  # Increase regularization (less aggressively than previous version)
+                # epsloc = 1.1 * epsloc  # Increase regularization (less aggressively than previous version)
                 failedSinkhornIterations += 1
+            # print(f"<><> FINAL EPSILON IN SINKHORN WITH EPS: {epsloc}, FAILED: {failInd}<><>")
 
             # Store transport map for this transition
             tMap[jt] = M

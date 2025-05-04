@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.linalg import expm
 from stanley_appex.utils import kernel, OT_sinkhorn, cov, cov_approx, sinkhorn_log
+import matplotlib.pyplot as plt
 
 def pairwise_kernel(xs, ts, t_idx, A, H):
     N_traj = xs.shape[0]
@@ -53,6 +54,8 @@ def kernel_vec(x, y, t_curr, t_future, A, H):
 #     return np.exp(-np.einsum('ijk,kl,ijl->ji', d, np.linalg.inv(c), d)) # returns N x N kernel
 
 def time_pairwise_kernel_rectangle(xs, ts, A, H, only_approx=False):
+
+    assert len(xs) == len(ts), "length of xs and ts must be the same"
     K = []
     K_approx = []
     for i in range(len(ts) - 1):
@@ -119,6 +122,9 @@ def OT_time_kernel(xs, ts, A, H, maxiters = 1000):
 def OT_time_kernel_rectangle(xs, ts, A, H, maxiters = 1000):
     # K: N x N_traj(t_curr) x N_traj(t_future)
     # Pi: N x N_traj(t_curr) x N_traj(t_future)
+    assert len(xs) == len(ts), "length of xs and ts must be the same"
+    assert len(xs[0][0]) == len(A), 'dimension of xs and A must be the same'
+    assert len(xs[0][0]) == len(H), 'dimension of xs and H must be the same'
     Pi = []
     K, K_approx = time_pairwise_kernel_rectangle(xs, ts, A, H, only_approx=False)
     for t_idx in range(len(ts) - 1):
@@ -187,6 +193,9 @@ def sample_trajectory_idxs_rectangle(Pi, N_sample):
             
             # pi_next_given_curr = normalize_column(Pi[t_idx - 1][:, sample_idx]) # conditional p_{i+1 | i} previous
             pi_next_given_curr = normalize_column(Pi[t_idx - 1][sample_idx, :]) # conditional p_{i+1 | i}
+            # plt.imshow(Pi[t_idx - 1])
+            # print("time index", t_idx - 1)
+            # plt.show()
             sample_idx = np.random.choice(N_traj, p=pi_next_given_curr)
             idxs_sampled[i, t_idx] = sample_idx
             
@@ -271,11 +280,16 @@ def appex(xs_data, ts_data, A, H, N_sample, tol = 1e-5, maxiters = 100):
     return As, Hs, Pis
 
 def appex_rectangle(xs_data, ts_data, A_guess, H_guess, N_sample, tol = 1e-5, maxiters = 100, print_out = 100, save_coupling = False, ridge_lambda=0.0, reverse=False):
+    assert len(xs_data) == len(ts_data), "length of xs and ts must be the same"
+    assert len(xs_data[0][0]) == len(A_guess), 'dimension of xs and A must be the same'
+    assert len(xs_data[0][0]) == len(H_guess), 'dimension of xs and H must be the same'
+    
     d = A_guess.shape[0]
     As = [np.ones((d, d)), A_guess] # collection of A matrices
     Hs = [np.ones((d, d)), H_guess] #
     Pis = []
     i = 0
+    
     while i < maxiters:
         running_tol = np.linalg.norm(As[-1] - As[-2])
         # if running_tol < tol:
