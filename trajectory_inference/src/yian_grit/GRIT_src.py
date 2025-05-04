@@ -1,5 +1,5 @@
 import numpy as np
-def generate_discrete_time_system_data(A_true, b_true, x0, n_timepoints, dt, n_cells, epsilon, shuffle=False):
+def generate_discrete_time_system_data(A_true, b_true, x0_mean, n_timepoints, dt, n_cells, epsilon, shuffle=False,x0_samples=None):
     
     """
     Generate synthetic data based on the discrete-time system equation
@@ -30,7 +30,8 @@ def generate_discrete_time_system_data(A_true, b_true, x0, n_timepoints, dt, n_c
     t_list = []
     
     # Generate initial time point
-    x0_samples = np.random.multivariate_normal(x0, np.eye(n_genes), n_cells).T
+    if x0_samples is None:
+        x0_samples = np.random.multivariate_normal(x0_mean, np.eye(n_genes), n_cells).T
     Y_list.append(x0_samples)
     t_list.append(0)
     
@@ -135,7 +136,7 @@ def OTsolver_MATLABCODE(mu0, mu1, C, epsilon, uInit=None):
 
         return transport_cost, reg_cost, M, iteration_count, u1
 
-def GRIT_MATLAB(scdata, Tgrid, epsilon):
+def GRIT_MATLAB_EpsilonInOT(scdata, Tgrid, epsilon):
     TFflag = []
     branchId = []
     opts=None
@@ -442,7 +443,7 @@ def GRIT_MATLAB(scdata, Tgrid, epsilon):
             iteration_count = 0
 
             while failInd and failedSinkhornIterations < 10:
-                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc * np.median(C), uInit)
+                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc, uInit)
                 failInd = np.sum(np.isnan(M)) > 0
                 epsloc = 1.5 * epsloc
                 failedSinkhornIterations += 1
@@ -534,11 +535,13 @@ def GRIT_MATLAB(scdata, Tgrid, epsilon):
     #OUTPUT = [XX, YY, transportMap, J, A, D, WW, corNet, indw, indexp, TFflag, difs, out, opts]
     return A
 
-def GRIT_MATLAB_Reduced(scdata,Tgrid,epsilon):
+def GRIT_MATLAB_NO_SVD(scdata,Tgrid,epsilon):
 
     """
     Python implementation of GRITmodelSelect function for gene regulatory network inference
-    WITHOUT SVD, branching, zero weight and TF flag
+    WITHOUT branching, zero weight and TF flag
+    WITHOUT SVD
+
     Parameters:
     -----------
     scdata : list of numpy arrays
@@ -774,6 +777,913 @@ def GRIT_MATLAB_Reduced(scdata,Tgrid,epsilon):
 
     #OUTPUT = [XX, YY, transportMap, J, A, D, WW, corNet, indw, indexp, TFflag, difs, out, opts]
     return  A
+
+def GRIT_MATLAB_NO_SVD_VarianceNormalization(scdata,Tgrid,epsilon):
+
+    """
+    Python implementation of GRITmodelSelect function for gene regulatory network inference
+    WITHOUT branching, zero weight and TF flag. 
+    WITHOUT SVD, normalization of variance 
+
+    Parameters:
+    -----------
+    scdata : list of numpy arrays
+        Single-cell data for each time point
+    Tgrid : list or numpy array
+        Time points for the data
+    opts : dict, optional
+        Options for the algorithm
+    Returns:
+    --------
+    Gene regulatory matrix A and the transport maps
+    size of A is (n_genes, n_genes + 1)
+    """
+
+    disp = 'off'
+    iterations = 30
+
+    # Get dimensions
+    ndim = scdata[0].shape[0]  # Number of genes
+    nbr = 1
+
+    # Count cells in samples
+    ncell = np.zeros(len(scdata), dtype=int)
+    nzeros = 0
+    nelements = 0
+
+    # Process each time point
+    for jt in range(len(scdata)):
+        ncell[jt] = scdata[jt].shape[1]
+        nzeros += np.sum(scdata[jt] == 0)
+        nelements += scdata[jt].size
+
+    # Process time grid for Single experiment
+    Tgrid = np.array(Tgrid)
+    indtr = np.arange(len(scdata)-1)
+    indw = np.arange(sum(ncell[:-1]))
+    Ttot = max(Tgrid) - min(Tgrid)
+
+    # Check consistency
+    if len(Tgrid) != len(scdata):
+        raise ValueError("Time grid vector length does not match the data structure size")
+
+    # # at each time point, calculate variance for each gene over all cells
+    # vvs = np.zeros((ndim, len(indtr)))
+    # for jt in range(len(indtr)):
+    #     mtemp = np.mean(scdata[indtr[jt]+1], axis=1, keepdims=True) 
+    #     mtemp[np.isnan(mtemp)] = 0
+    #     vvs[:, jt] += np.sum((scdata[indtr[jt]+1]- mtemp)**2, axis=1)
+    #     vvs[:, jt] = vvs[:, jt] / ncell[indtr[jt]+1] 
+
+    # # weight the vvs by number of cells in the previous time step 
+    # weighted_vvs = np.zeros_like(vvs)
+    # for jt in range(len(indtr)):
+    #     weighted_vvs[:, jt] = ncell[indtr[jt]] * vvs[:, jt]
+
+    # # final variance is 
+    # vvs = 0.5 + 0.2 * np.sum(weighted_vvs, axis=1, keepdims=True) / np.sum(ncell[indtr]) + 0.8 * vvs
+    # vvs = vvs**(-0.5)
+
+    # Build regression matrices
+    XX = np.empty((ndim + nbr, 0))
+    #XX = np.empty((ndim, 0)) #change 1
+    DT = np.empty(0)
+
+    for jt in range(len(indtr)):
+        branch_padding = np.ones((1, ncell[indtr[jt]])) 
+        data_with_branch = np.vstack([scdata[indtr[jt]],branch_padding]) #change 2
+        XX = np.hstack([XX, data_with_branch])
+        #data_at_jt = scdata[indtr[jt]]
+        #XX = np.hstack([XX, data_at_jt])
+
+        dt_values = (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5 * np.ones(ncell[indtr[jt]])
+        DT = np.hstack([DT, dt_values])
+
+    YY = np.zeros((ndim, XX.shape[1]))
+
+    # Regularization weights
+    D = 0.01 * Ttot * np.diag(XX @ XX.T) / XX.shape[1]
+    D[-nbr:] = 10 * D[-nbr:] #change 3
+
+    #  Weight matrix for each cell, set to 1
+    WW = np.ones((ndim, sum(ncell)))
+
+    # Scale XX by time differences
+    XX = DT * XX
+
+    A = np.zeros((ndim, ndim+nbr)) # change 4
+    #A = np.ones((ndim, ndim))
+    difs = np.zeros(iterations)
+    J = np.zeros(iterations)
+
+    uFin = [1] * len(indtr)
+    transportMap = [None] * len(scdata)
+
+    # Prepare for main iteration loop
+    convergenceProblemIndicator = [0] * len(indtr)
+    tMap = [None] * len(indtr)
+    Jadd = [0] * len(indtr)
+    its = [0] * len(indtr)
+    der = [None] * len(indtr)
+
+    # Main iterative loop
+    for jiter in range(iterations):
+        kreg = min(0.5 + 0.7 * (jiter+1) / iterations, 1)
+        Aold = A.copy()
+
+        # Process each transition
+        for jt in range(len(indtr)):
+            # Propagated and target points
+            # change 5
+            branch_padding = np.ones((1, ncell[indtr[jt]])) 
+            X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ np.vstack([scdata[indtr[jt]], branch_padding])
+            #X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ scdata[indtr[jt]]
+            X1 = scdata[indtr[jt]+1]
+
+            # # Cost matrix
+            ett0 = np.ones((X0.shape[1], 1))
+            ett1 = np.ones((X1.shape[1], 1))
+
+
+            # vX0 = vvs[:, jt].reshape(-1, 1) * X0
+            # vX1 = vvs[:, jt].reshape(-1, 1) * X1
+
+            # ignore svd
+            #UvX0 = Ured.T @ vX0
+            #UvX1 = Ured.T @ vX1
+
+            # ignore svd
+            UvX0 = X0
+            UvX1 = X1
+
+            sum_UvX0_squared = np.sum(UvX0**2, axis=0).reshape(-1, 1)
+            sum_UvX1_squared = np.sum(UvX1**2, axis=0)
+
+
+            C = sum_UvX0_squared @ ett1.T - 2 * UvX0.T @ UvX1 + ett0 @ sum_UvX1_squared.reshape(1, -1)
+
+            # only for same amount of cell in each time point
+            mu0 = np.ones(np.shape(X0)[1])/np.shape(X0)[1]
+            mu1 = np.ones(np.shape(X1)[1])/np.shape(X1)[1]
+
+            if jiter == 0:
+                uInit = mu1
+            else:
+                uInit = uFin[jt]
+
+            # Solve optimal transport problem
+            epsloc = epsilon
+            failInd = True
+            failedSinkhornIterations = -1
+
+            M = None
+            uFinal = None
+            transport_cost = 0
+            reg_cost = 0
+            iteration_count = 0
+
+            while failInd and failedSinkhornIterations < 10:
+                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc * np.median(C), uInit)
+                #transport_plan = ot.sinkhorn(a, b, cost_matrix, epsilon, method=method)
+
+                failInd = np.sum(np.isnan(M)) > 0
+                epsloc = 1.5 * epsloc
+                failedSinkhornIterations += 1
+
+            if jiter == iterations - 1 and failedSinkhornIterations > 0:
+                convergenceProblemIndicator[jt] = 1
+
+            tMap[jt] = M
+            uFin[jt] = uFinal
+            Jadd[jt] = transport_cost + epsilon * np.median(C) * reg_cost
+            its[jt] = iteration_count
+
+            M = M / np.sum(M, axis=1, keepdims=True)
+
+            # Estimate derivatives
+            ww_slice = WW[:, sum(ncell[:indtr[jt]]):sum(ncell[:indtr[jt]+1])]
+
+            M_product = ww_slice @ M
+            X1M = X1 @ M.T
+
+            der[jt] = ((X1M / M_product) - scdata[indtr[jt]]) / (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5
+
+        # Collect derivatives
+        iaux = 0
+        for jt in range(len(indtr)):
+            YY[:, iaux:iaux + der[jt].shape[1]] = der[jt] # construct derivative
+            J[jiter] += Jadd[jt]
+            iaux += der[jt].shape[1]
+            transportMap[indtr[jt]] = tMap[jt]
+
+        # Solve for A using regression
+        Anew = np.zeros_like(A)
+
+        for jg in range(ndim):
+
+            # WV = np.zeros(YY.shape[1])
+            # iaux = 0
+            # for jt in range(len(indtr)):
+            #     WV[iaux:iaux + ncell[indtr[jt]]] = vvs[jg, jt]**2
+            #     iaux += ncell[indtr[jt]]
+
+            # Weight matrices
+            # ignore variance weight
+            # W_diag = WV * WW[jg, indw]
+            W_diag = np.ones(YY.shape[1]) * WW[jg, indw]
+            #XX_TF = XX[TFloc, :]
+
+            # Weighted regression with regularization
+            #weighted_XX = XX_TF * W_diag
+            weighted_XX = XX * W_diag
+            weighted_YY = YY[jg, :] * W_diag
+
+            #reg_matrix = weighted_XX @ XX_TF.T + np.diag(D[TFloc])
+            reg_matrix = weighted_XX @ XX.T + np.diag(D)
+            #Anew[jg, TFloc] = weighted_YY @ XX_TF.T @ np.linalg.inv(reg_matrix)
+            Anew[jg, :] = weighted_YY @ XX.T @ np.linalg.inv(reg_matrix)
+
+
+
+        # Regularized update
+        A = (1 - kreg) * Aold + kreg * Anew
+
+        # Check progress
+        difs[jiter] = np.sqrt(np.sum((A - Aold)**2))
+
+        if disp == 'all':
+            print(f"Iteration {jiter+1}/{iterations} done.")
+
+    # Final A is the unregularized one
+    A = Anew
+
+    if disp != 'off':
+         print("Model identification complete.")
+
+    #OUTPUT = [XX, YY, transportMap, J, A, D, WW, corNet, indw, indexp, TFflag, difs, out, opts]
+    return  A
+
+def GRIT_MATLAB_NO_SVD_VarianceNormalization_kreg1(scdata,Tgrid,epsilon):
+
+    """
+    Python implementation of GRITmodelSelect function for gene regulatory network inference
+    WITHOUT branching, zero weight and TF flag. 
+    WITHOUT SVD, normalization of variance, kreg =1
+
+    Parameters:
+    -----------
+    scdata : list of numpy arrays
+        Single-cell data for each time point
+    Tgrid : list or numpy array
+        Time points for the data
+    opts : dict, optional
+        Options for the algorithm
+    Returns:
+    --------
+    Gene regulatory matrix A and the transport maps
+    size of A is (n_genes, n_genes + 1)
+    """
+
+    disp = 'off'
+    iterations = 30
+
+    # Get dimensions
+    ndim = scdata[0].shape[0]  # Number of genes
+    nbr = 1
+
+    # Count cells in samples
+    ncell = np.zeros(len(scdata), dtype=int)
+    nzeros = 0
+    nelements = 0
+
+    # Process each time point
+    for jt in range(len(scdata)):
+        ncell[jt] = scdata[jt].shape[1]
+        nzeros += np.sum(scdata[jt] == 0)
+        nelements += scdata[jt].size
+
+    # Process time grid for Single experiment
+    Tgrid = np.array(Tgrid)
+    indtr = np.arange(len(scdata)-1)
+    indw = np.arange(sum(ncell[:-1]))
+    Ttot = max(Tgrid) - min(Tgrid)
+
+    # Check consistency
+    if len(Tgrid) != len(scdata):
+        raise ValueError("Time grid vector length does not match the data structure size")
+
+    # # at each time point, calculate variance for each gene over all cells
+    # vvs = np.zeros((ndim, len(indtr)))
+    # for jt in range(len(indtr)):
+    #     mtemp = np.mean(scdata[indtr[jt]+1], axis=1, keepdims=True) 
+    #     mtemp[np.isnan(mtemp)] = 0
+    #     vvs[:, jt] += np.sum((scdata[indtr[jt]+1]- mtemp)**2, axis=1)
+    #     vvs[:, jt] = vvs[:, jt] / ncell[indtr[jt]+1] 
+
+    # # weight the vvs by number of cells in the previous time step 
+    # weighted_vvs = np.zeros_like(vvs)
+    # for jt in range(len(indtr)):
+    #     weighted_vvs[:, jt] = ncell[indtr[jt]] * vvs[:, jt]
+
+    # # final variance is 
+    # vvs = 0.5 + 0.2 * np.sum(weighted_vvs, axis=1, keepdims=True) / np.sum(ncell[indtr]) + 0.8 * vvs
+    # vvs = vvs**(-0.5)
+
+    # Build regression matrices
+    XX = np.empty((ndim + nbr, 0))
+    #XX = np.empty((ndim, 0)) #change 1
+    DT = np.empty(0)
+
+    for jt in range(len(indtr)):
+        branch_padding = np.ones((1, ncell[indtr[jt]])) 
+        data_with_branch = np.vstack([scdata[indtr[jt]],branch_padding]) #change 2
+        XX = np.hstack([XX, data_with_branch])
+        #data_at_jt = scdata[indtr[jt]]
+        #XX = np.hstack([XX, data_at_jt])
+
+        dt_values = (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5 * np.ones(ncell[indtr[jt]])
+        DT = np.hstack([DT, dt_values])
+
+    YY = np.zeros((ndim, XX.shape[1]))
+
+    # Regularization weights
+    D = 0.01 * Ttot * np.diag(XX @ XX.T) / XX.shape[1]
+    D[-nbr:] = 10 * D[-nbr:] #change 3
+
+    #  Weight matrix for each cell, set to 1
+    WW = np.ones((ndim, sum(ncell)))
+
+    # Scale XX by time differences
+    XX = DT * XX
+
+    A = np.zeros((ndim, ndim+nbr)) # change 4
+    #A = np.ones((ndim, ndim))
+    difs = np.zeros(iterations)
+    J = np.zeros(iterations)
+
+    uFin = [1] * len(indtr)
+    transportMap = [None] * len(scdata)
+
+    # Prepare for main iteration loop
+    convergenceProblemIndicator = [0] * len(indtr)
+    tMap = [None] * len(indtr)
+    Jadd = [0] * len(indtr)
+    its = [0] * len(indtr)
+    der = [None] * len(indtr)
+
+    # Main iterative loop
+    for jiter in range(iterations):
+        kreg = 1
+        Aold = A.copy()
+
+        # Process each transition
+        for jt in range(len(indtr)):
+            # Propagated and target points
+            # change 5
+            branch_padding = np.ones((1, ncell[indtr[jt]])) 
+            X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ np.vstack([scdata[indtr[jt]], branch_padding])
+            #X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ scdata[indtr[jt]]
+            X1 = scdata[indtr[jt]+1]
+
+            # # Cost matrix
+            ett0 = np.ones((X0.shape[1], 1))
+            ett1 = np.ones((X1.shape[1], 1))
+
+
+            # vX0 = vvs[:, jt].reshape(-1, 1) * X0
+            # vX1 = vvs[:, jt].reshape(-1, 1) * X1
+
+            # ignore svd
+            #UvX0 = Ured.T @ vX0
+            #UvX1 = Ured.T @ vX1
+
+            # ignore svd
+            UvX0 = X0
+            UvX1 = X1
+
+            sum_UvX0_squared = np.sum(UvX0**2, axis=0).reshape(-1, 1)
+            sum_UvX1_squared = np.sum(UvX1**2, axis=0)
+
+
+            C = sum_UvX0_squared @ ett1.T - 2 * UvX0.T @ UvX1 + ett0 @ sum_UvX1_squared.reshape(1, -1)
+
+            # only for same amount of cell in each time point
+            mu0 = np.ones(np.shape(X0)[1])/np.shape(X0)[1]
+            mu1 = np.ones(np.shape(X1)[1])/np.shape(X1)[1]
+
+            if jiter == 0:
+                uInit = mu1
+            else:
+                uInit = uFin[jt]
+
+            # Solve optimal transport problem
+            epsloc = epsilon
+            failInd = True
+            failedSinkhornIterations = -1
+
+            M = None
+            uFinal = None
+            transport_cost = 0
+            reg_cost = 0
+            iteration_count = 0
+
+            while failInd and failedSinkhornIterations < 10:
+                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc * np.median(C), uInit)
+                #transport_plan = ot.sinkhorn(a, b, cost_matrix, epsilon, method=method)
+
+                failInd = np.sum(np.isnan(M)) > 0
+                epsloc = 1.5 * epsloc
+                failedSinkhornIterations += 1
+
+            if jiter == iterations - 1 and failedSinkhornIterations > 0:
+                convergenceProblemIndicator[jt] = 1
+
+            tMap[jt] = M
+            uFin[jt] = uFinal
+            Jadd[jt] = transport_cost + epsilon * np.median(C) * reg_cost
+            its[jt] = iteration_count
+
+            M = M / np.sum(M, axis=1, keepdims=True)
+
+            # Estimate derivatives
+            ww_slice = WW[:, sum(ncell[:indtr[jt]]):sum(ncell[:indtr[jt]+1])]
+
+            M_product = ww_slice @ M
+            X1M = X1 @ M.T
+
+            der[jt] = ((X1M / M_product) - scdata[indtr[jt]]) / (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5
+
+        # Collect derivatives
+        iaux = 0
+        for jt in range(len(indtr)):
+            YY[:, iaux:iaux + der[jt].shape[1]] = der[jt] # construct derivative
+            J[jiter] += Jadd[jt]
+            iaux += der[jt].shape[1]
+            transportMap[indtr[jt]] = tMap[jt]
+
+        # Solve for A using regression
+        Anew = np.zeros_like(A)
+
+        for jg in range(ndim):
+
+            # WV = np.zeros(YY.shape[1])
+            # iaux = 0
+            # for jt in range(len(indtr)):
+            #     WV[iaux:iaux + ncell[indtr[jt]]] = vvs[jg, jt]**2
+            #     iaux += ncell[indtr[jt]]
+
+            # Weight matrices
+            # ignore variance weight
+            # W_diag = WV * WW[jg, indw]
+            W_diag = np.ones(YY.shape[1]) * WW[jg, indw]
+            #XX_TF = XX[TFloc, :]
+
+            # Weighted regression with regularization
+            #weighted_XX = XX_TF * W_diag
+            weighted_XX = XX * W_diag
+            weighted_YY = YY[jg, :] * W_diag
+
+            #reg_matrix = weighted_XX @ XX_TF.T + np.diag(D[TFloc])
+            reg_matrix = weighted_XX @ XX.T + np.diag(D)
+            #Anew[jg, TFloc] = weighted_YY @ XX_TF.T @ np.linalg.inv(reg_matrix)
+            Anew[jg, :] = weighted_YY @ XX.T @ np.linalg.inv(reg_matrix)
+
+
+
+        # Regularized update
+        A = (1 - kreg) * Aold + kreg * Anew
+
+        # Check progress
+        difs[jiter] = np.sqrt(np.sum((A - Aold)**2))
+
+        if disp == 'all':
+            print(f"Iteration {jiter+1}/{iterations} done.")
+
+    # Final A is the unregularized one
+    A = Anew
+
+    if disp != 'off':
+         print("Model identification complete.")
+
+    #OUTPUT = [XX, YY, transportMap, J, A, D, WW, corNet, indw, indexp, TFflag, difs, out, opts]
+    return  A, transportMap
+
+def GRIT_MATLAB_NO_SVD_VarianceNormalization_kreg1_EpsilonInOT(scdata,Tgrid,epsilon):
+
+    """
+    Python implementation of GRITmodelSelect function for gene regulatory network inference
+    WITHOUT branching, zero weight and TF flag. 
+    WITHOUT SVD, normalization of variance, kreg =1, scaling in OT is epsilon instead of epsilon * median(C)
+
+    Parameters:
+    -----------
+    scdata : list of numpy arrays
+        Single-cell data for each time point
+    Tgrid : list or numpy array
+        Time points for the data
+    epsilon : float
+        Regularization parameter for optimal transport
+    Returns:
+    --------
+    Gene regulatory matrix A and the transport maps
+    size of A is (n_genes, n_genes)
+    """
+
+    disp = 'off'
+    iterations = 30
+
+    # Get dimensions
+    ndim = scdata[0].shape[0]  # Number of genes
+    nbr = 1
+
+    # Count cells in samples
+    ncell = np.zeros(len(scdata), dtype=int)
+    nzeros = 0
+    nelements = 0
+
+    # Process each time point
+    for jt in range(len(scdata)):
+        ncell[jt] = scdata[jt].shape[1]
+        nzeros += np.sum(scdata[jt] == 0)
+        nelements += scdata[jt].size
+
+    # Process time grid for Single experiment
+    Tgrid = np.array(Tgrid)
+    indtr = np.arange(len(scdata)-1)
+    indw = np.arange(sum(ncell[:-1]))
+    Ttot = max(Tgrid) - min(Tgrid)
+
+    # Check consistency
+    if len(Tgrid) != len(scdata):
+        raise ValueError("Time grid vector length does not match the data structure size")
+
+    # # at each time point, calculate variance for each gene over all cells
+    # vvs = np.zeros((ndim, len(indtr)))
+    # for jt in range(len(indtr)):
+    #     mtemp = np.mean(scdata[indtr[jt]+1], axis=1, keepdims=True) 
+    #     mtemp[np.isnan(mtemp)] = 0
+    #     vvs[:, jt] += np.sum((scdata[indtr[jt]+1]- mtemp)**2, axis=1)
+    #     vvs[:, jt] = vvs[:, jt] / ncell[indtr[jt]+1] 
+
+    # # weight the vvs by number of cells in the previous time step 
+    # weighted_vvs = np.zeros_like(vvs)
+    # for jt in range(len(indtr)):
+    #     weighted_vvs[:, jt] = ncell[indtr[jt]] * vvs[:, jt]
+
+    # # final variance is 
+    # vvs = 0.5 + 0.2 * np.sum(weighted_vvs, axis=1, keepdims=True) / np.sum(ncell[indtr]) + 0.8 * vvs
+    # vvs = vvs**(-0.5)
+
+    # Build regression matrices
+    XX = np.empty((ndim + nbr, 0))
+    # XX = np.empty((ndim, 0)) #change 1
+    DT = np.empty(0)
+
+    for jt in range(len(indtr)):
+        branch_padding = np.ones((1, ncell[indtr[jt]])) 
+        data_with_branch = np.vstack([scdata[indtr[jt]],branch_padding]) #change 2
+        XX = np.hstack([XX, data_with_branch])
+        #data_at_jt = scdata[indtr[jt]]
+        #XX = np.hstack([XX, data_at_jt])
+
+        dt_values = (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5 * np.ones(ncell[indtr[jt]])
+        DT = np.hstack([DT, dt_values])
+
+    YY = np.zeros((ndim, XX.shape[1]))
+
+    # Regularization weights
+    D = 0.01 * Ttot * np.diag(XX @ XX.T) / XX.shape[1]
+    D[-nbr:] = 10 * D[-nbr:] #change 3
+
+    #  Weight matrix for each cell, set to 1
+    WW = np.ones((ndim, sum(ncell)))
+
+    # Scale XX by time differences
+    XX = DT * XX
+
+    A = np.zeros((ndim, ndim+nbr)) # change 4
+    #A = np.ones((ndim, ndim))
+    difs = np.zeros(iterations)
+    J = np.zeros(iterations)
+
+    uFin = [1] * len(indtr)
+    transportMap = [None] * len(scdata)
+
+    # Prepare for main iteration loop
+    convergenceProblemIndicator = [0] * len(indtr)
+    tMap = [None] * len(indtr)
+    Jadd = [0] * len(indtr)
+    its = [0] * len(indtr)
+    der = [None] * len(indtr)
+
+    # Main iterative loop
+    for jiter in range(iterations):
+        kreg = 1
+        Aold = A.copy()
+
+        # Process each transition
+        for jt in range(len(indtr)):
+            # Propagated and target points
+            # change 5
+            branch_padding = np.ones((1, ncell[indtr[jt]])) 
+            X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ np.vstack([scdata[indtr[jt]], branch_padding])
+            #X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ scdata[indtr[jt]]
+            X1 = scdata[indtr[jt]+1]
+
+            # # Cost matrix
+            ett0 = np.ones((X0.shape[1], 1))
+            ett1 = np.ones((X1.shape[1], 1))
+
+
+            # vX0 = vvs[:, jt].reshape(-1, 1) * X0
+            # vX1 = vvs[:, jt].reshape(-1, 1) * X1
+
+            # ignore svd
+            #UvX0 = Ured.T @ vX0
+            #UvX1 = Ured.T @ vX1
+
+            # ignore svd
+            UvX0 = X0
+            UvX1 = X1
+
+            sum_UvX0_squared = np.sum(UvX0**2, axis=0).reshape(-1, 1)
+            sum_UvX1_squared = np.sum(UvX1**2, axis=0)
+
+
+            C = sum_UvX0_squared @ ett1.T - 2 * UvX0.T @ UvX1 + ett0 @ sum_UvX1_squared.reshape(1, -1)
+
+            # only for same amount of cell in each time point
+            mu0 = np.ones(np.shape(X0)[1])/np.shape(X0)[1]
+            mu1 = np.ones(np.shape(X1)[1])/np.shape(X1)[1]
+
+            if jiter == 0:
+                uInit = mu1
+            else:
+                uInit = uFin[jt]
+
+            # Solve optimal transport problem
+            epsloc = epsilon
+            failInd = True
+            failedSinkhornIterations = -1
+
+            M = None
+            uFinal = None
+            transport_cost = 0
+            reg_cost = 0
+            iteration_count = 0
+
+            while failInd and failedSinkhornIterations < 10:
+                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc, uInit)
+                #transport_plan = ot.sinkhorn(a, b, cost_matrix, epsilon, method=method)
+
+                failInd = np.sum(np.isnan(M)) > 0
+                epsloc = 1.5 * epsloc
+                failedSinkhornIterations += 1
+
+            if jiter == iterations - 1 and failedSinkhornIterations > 0:
+                convergenceProblemIndicator[jt] = 1
+
+            tMap[jt] = M
+            uFin[jt] = uFinal
+            Jadd[jt] = transport_cost + epsilon * np.median(C) * reg_cost
+            its[jt] = iteration_count
+
+            M = M / np.sum(M, axis=1, keepdims=True)
+
+            # Estimate derivatives
+            ww_slice = WW[:, sum(ncell[:indtr[jt]]):sum(ncell[:indtr[jt]+1])]
+
+            M_product = ww_slice @ M
+            X1M = X1 @ M.T
+
+            der[jt] = ((X1M / M_product) - scdata[indtr[jt]]) / (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5
+
+        # Collect derivatives
+        iaux = 0
+        for jt in range(len(indtr)):
+            YY[:, iaux:iaux + der[jt].shape[1]] = der[jt] # construct derivative
+            J[jiter] += Jadd[jt]
+            iaux += der[jt].shape[1]
+            transportMap[indtr[jt]] = tMap[jt]
+
+        # Solve for A using regression
+        Anew = np.zeros_like(A)
+
+        for jg in range(ndim):
+
+            # WV = np.zeros(YY.shape[1])
+            # iaux = 0
+            # for jt in range(len(indtr)):
+            #     WV[iaux:iaux + ncell[indtr[jt]]] = vvs[jg, jt]**2
+            #     iaux += ncell[indtr[jt]]
+
+            # Weight matrices
+            # ignore variance weight
+            # W_diag = WV * WW[jg, indw]
+            W_diag = np.ones(YY.shape[1]) * WW[jg, indw]
+            
+            #XX_TF = XX[TFloc, :]
+
+            # Weighted regression with regularization
+            #weighted_XX = XX_TF * W_diag
+            weighted_XX = XX * W_diag
+            weighted_YY = YY[jg, :] * W_diag
+
+            #reg_matrix = weighted_XX @ XX_TF.T + np.diag(D[TFloc])
+            reg_matrix = weighted_XX @ XX.T + np.diag(D)
+            #Anew[jg, TFloc] = weighted_YY @ XX_TF.T @ np.linalg.inv(reg_matrix)
+            Anew[jg, :] = weighted_YY @ XX.T @ np.linalg.inv(reg_matrix)
+
+        # Regularized update
+        A = (1 - kreg) * Aold + kreg * Anew
+
+        # Check progress
+        difs[jiter] = np.sqrt(np.sum((A - Aold)**2))
+
+        if disp == 'all':
+            print(f"Iteration {jiter+1}/{iterations} done.")
+
+    # Final A is the unregularized one
+    A = Anew
+
+    if disp != 'off':
+         print("Model identification complete.")
+
+    #OUTPUT = [XX, YY, transportMap, J, A, D, WW, corNet, indw, indexp, TFflag, difs, out, opts]
+    return  A, transportMap
+
+def GRIT_MATLAB_No_adhock_nob(scdata, Tgrid, epsilon):
+    """
+    Python implementation of GRITmodelSelect function for gene regulatory network inference
+    The only adhock thing is when OT solver fails, update epsilon by 1.1*epsilon
+    no regularization in the regression step
+    b=0 
+    
+    Parameters:
+    -----------
+    scdata : list of numpy arrays
+        Single-cell data for each time point
+    Tgrid : list or numpy array
+        Time points for the data
+    epsilon : float
+        Regularization parameter for optimal transport
+    Returns:
+    --------
+    Gene regulatory matrix A and the transport maps
+    size of A is (n_genes, n_genes)
+    """
+
+    # Set display mode and number of iterations
+    disp = 'off'  # Controls output verbosity during execution
+    iterations = 30  # Number of iterations for convergence
+
+    # Get the number of genes from the first time point data
+    ndim = scdata[0].shape[0]  # Number of genes
+
+    # Initialize array to store cell counts at each time point
+    ncell = np.zeros(len(scdata), dtype=int)
+    # nzeros = 0  # Commented out: counter for zero entries (unused)
+    # nelements = 0  # Commented out: counter for total elements (unused)
+
+    # Count cells at each time point
+    for jt in range(len(scdata)):
+        ncell[jt] = scdata[jt].shape[1]  # Number of cells at time point jt
+        # nzeros += np.sum(scdata[jt] == 0)  # Commented out: count zeros (unused)
+        # nelements += scdata[jt].size  # Commented out: count total elements (unused)
+
+    # Convert time grid to numpy array and get transition indices
+    Tgrid = np.array(Tgrid)
+    indtr = np.arange(len(scdata)-1)  # Indices for transitions between time points
+
+    # Check that time grid length matches data length
+    if len(Tgrid) != len(scdata):
+        raise ValueError("Time grid vector length does not match the data structure size")
+
+    # Initialize regression matrices
+    XX = np.empty((ndim, 0))  # Matrix to store gene expression data
+    DT = np.empty(0)  # Vector to store time differences
+
+    # Build regression matrices by concatenating data from all time points
+    for jt in range(len(indtr)):
+        data_at_jt = scdata[indtr[jt]]  # Get data at current time point
+        XX = np.hstack([XX, data_at_jt])  # Add data to XX matrix
+        
+        # Calculate square root of time differences for each cell
+        dt_values = (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5 * np.ones(ncell[indtr[jt]])
+        DT = np.hstack([DT, dt_values])  # Add time differences to DT vector
+
+    # Initialize target matrix for regression (will hold derivatives)
+    YY = np.zeros((ndim, XX.shape[1]))
+
+    # Scale gene expression data by time differences
+    XX = DT * XX
+
+    # Initialize gene regulatory matrix A with ones (instead of zeros in the previous version)
+    # This means initially all genes are assumed to regulate all other genes
+    A = np.ones((ndim, ndim))
+    difs = np.zeros(iterations)  # Track differences between iterations
+
+    # Initialize array to store transport maps between time points
+    transportMap = [None] * len(scdata)
+
+    # Initialize arrays for main iteration loop
+    tMap = [None] * len(indtr)  # Temporary storage for transport maps
+    der = [None] * len(indtr)  # Derivatives
+
+    # Main iterative optimization loop
+    for jiter in range(iterations):
+        Aold = A.copy()  # Store previous A for tracking convergence
+
+        # Process each transition between consecutive time points
+        for jt in range(len(indtr)):
+            # Propagate current state to next time point using current A matrix
+            # Note: No branch padding used in this version
+            X0 = scdata[indtr[jt]] + (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]]) * A @ scdata[indtr[jt]]  # Propagated data
+            X1 = scdata[indtr[jt]+1]  # Target data
+
+            # Create ones vectors for cost matrix calculation
+            ett0 = np.ones((X0.shape[1], 1))
+            ett1 = np.ones((X1.shape[1], 1))
+
+            # Skip SVD decomposition
+            UvX0 = X0
+            UvX1 = X1
+
+            # Calculate squared norms for each cell
+            sum_UvX0_squared = np.sum(UvX0**2, axis=0).reshape(-1, 1)
+            sum_UvX1_squared = np.sum(UvX1**2, axis=0)
+
+            # Calculate cost matrix C using squared Euclidean distances
+            # C_{ij} = ||x_i||^2 + ||y_j||^2 - 2x_i^T y_j
+            C = sum_UvX0_squared @ ett1.T - 2 * UvX0.T @ UvX1 + ett0 @ sum_UvX1_squared.reshape(1, -1)
+
+            # Create uniform distributions for source and target cells
+            mu0 = np.ones(np.shape(X0)[1])/np.shape(X0)[1]
+            mu1 = np.ones(np.shape(X1)[1])/np.shape(X1)[1]
+
+            # Set up for optimal transport problem
+            epsloc = epsilon  # Local regularization parameter
+            failInd = True  # Flag for Sinkhorn convergence failure
+            failedSinkhornIterations = -1  # Counter for failed iterations
+
+            M = None  # Transport matrix
+
+            # Try solving OT problem with increasing regularization if needed
+            while failInd and failedSinkhornIterations < 10:
+                # Solve optimal transport problem using external function
+                # Note: Not capturing uFinal, iteration_count or costs (simplified from previous version)
+                _, _, M, _, _ = OTsolver_MATLABCODE(mu0, mu1, C, epsloc)
+                
+                # Check if solution contains NaN values
+                failInd = np.sum(np.isnan(M)) > 0
+                epsloc = 1.1 * epsloc  # Increase regularization (less aggressively than previous version)
+                failedSinkhornIterations += 1
+
+            # Store transport map for this transition
+            tMap[jt] = M
+
+            # Normalize transport map rows to sum to 1
+            M = M / np.sum(M, axis=1, keepdims=True)
+
+            # Estimate derivatives using transport map
+            # Note: Simpler formula without weighted product
+            X1M = X1 @ M.T
+            der[jt] = (X1M - scdata[indtr[jt]]) / (Tgrid[indtr[jt]+1] - Tgrid[indtr[jt]])**0.5
+
+        # Collect derivatives from all transitions
+        iaux = 0
+        for jt in range(len(indtr)):
+            YY[:, iaux:iaux + der[jt].shape[1]] = der[jt]  # Store derivatives in YY
+            iaux += der[jt].shape[1]  # Update index
+            transportMap[indtr[jt]] = tMap[jt]  # Store transport map
+
+        # Solve for A using regression (no regularization)
+        Anew = np.zeros_like(A)
+
+        for jg in range(ndim):
+            # Standard least squares regression without regularization
+            reg_matrix = XX @ XX.T  # No regularization term added to diagonal
+            Anew[jg, :] = YY[jg] @ XX.T @ np.linalg.inv(reg_matrix)
+
+        # Update A (no regularization mixing parameter, directly use new solution)
+        A = Anew
+
+        # Track convergence by measuring change in A
+        difs[jiter] = np.sqrt(np.sum((A - Aold)**2))
+
+        # Display progress if requested
+        if disp == 'all':
+            print(f"Iteration {jiter+1}/{iterations} done.")
+
+    # Final A is the same as the last iteration
+    A = Anew
+
+    # Print completion message if not in 'off' mode
+    if disp != 'off':
+         print("Model identification complete.")
+         
+    # Return the gene regulatory matrix A and transport maps
+    return A, transportMap
 
 def generate_sparse_A(n_genes, sparsity=0.4):
     """
