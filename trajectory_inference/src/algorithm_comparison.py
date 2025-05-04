@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import timeit
 import wandb
+import h5py
 
 # 1d, 2d, 5d, 10d
 # random -1 +1 matrix with certain percentage of sparsity
@@ -372,7 +373,9 @@ def GRIT(scdata,Tgrid,config,A):
             iteration_count = 0
 
             while failInd and failedSinkhornIterations < 10:
-                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc * np.median(C), uInit)
+                
+                transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, opts['epsilon'], uInit)
+                # transport_cost, reg_cost, M, iteration_count, uFinal =  OTsolver_MATLABCODE(mu0, mu1, C, epsloc * np.median(C), uInit)
                 #transport_plan = ot.sinkhorn(a, b, cost_matrix, epsilon, method=method)
 
                 failInd = np.sum(np.isnan(M)) > 0
@@ -386,6 +389,7 @@ def GRIT(scdata,Tgrid,config,A):
             uFin[jt] = uFinal
             M = M / np.sum(M, axis=1, keepdims=True)
             Jadd[jt] = transport_cost + opts['epsilon'] * np.median(C) * reg_cost
+            # Jadd[jt] = transport_cost + opts['epsilon']
             its[jt] = iteration_count
 
             # Estimate derivatives
@@ -508,7 +512,7 @@ def generate_A(d, scale=0.5, n_matrices=50, p_zero=0.7):
     A = 0.5*np.random.choice([-1, 0, 1], p=[p_other, p_zero, p_other],size=(n_matrices, d, d))
     return [A[i, :, :].tolist() for i in range(A.shape[0])]
 
-As = generate_A(d=2, n_matrices=25, p_zero=0.1) + generate_A(d=5, n_matrices=50) + generate_A(d=10, n_matrices=100) + generate_A(d=20, n_matrices=100)
+As = generate_A(d=2, n_matrices=5, p_zero=0.1) + generate_A(d=5, n_matrices=5) + generate_A(d=10, n_matrices=5) + generate_A(d=20, n_matrices=5)
 def run_sweeps(config=None):
     for A in As:
         print(A)
@@ -550,5 +554,5 @@ if __name__ == "__main__":
     print('Number of runs:', num_runs)
     
     sweep_config['parameters'] = parameters_dict
-    sweep_id = wandb.sweep(sweep_config, project="grit-vs-appex-parameter-sweep")
+    sweep_id = wandb.sweep(sweep_config, project="grit(eps-fixed)-vs-appex-parameter-sweep")
     wandb.agent(sweep_id, run_sweeps, count=num_runs)
